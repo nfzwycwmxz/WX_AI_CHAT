@@ -2,7 +2,7 @@
 # VX 智能 AI
 
 > 微信 AI 自动回复机器人 — 给微信装一个 24 小时在线的 AI 管家
-初步版本，问题比较多，不喜勿喷！
+初步版本，可能有问题，不喜勿喷！
 
 ---
 
@@ -93,7 +93,8 @@ git clone <your-repo-url>
 cd vx-ai-chat
 
 # 2. 配置环境变量
- .env
+cp env.txt .env
+编辑 .env，填入 PYWXROBOT_URL 等配置
 
 # 3. 安装后端依赖
 pip install -r backend/requirements.txt
