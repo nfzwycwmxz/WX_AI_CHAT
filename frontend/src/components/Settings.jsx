@@ -5,6 +5,7 @@ import {
   createLLMConfig,
   deleteKeyword,
   deleteLLMConfig,
+  getKBConfigs,
   getKeywords,
   getLLMConfigs,
   getSystemConfigs,
@@ -78,6 +79,7 @@ function SmallButton({ children, onClick, disabled = false, className = '', titl
 
 export default function Settings() {
   const [configs, setConfigs] = useState({})
+  const [kbConfigs, setKbConfigs] = useState([])
   const [keywords, setKeywords] = useState([])
   const [llmConfigs, setLlmConfigs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -98,14 +100,16 @@ export default function Settings() {
 
   const loadData = async () => {
     try {
-      const [systemData, keywordData, llmData] = await Promise.all([
+      const [systemData, keywordData, llmData, kbData] = await Promise.all([
         getSystemConfigs(),
         getKeywords(),
         getLLMConfigs(),
+        getKBConfigs(),
       ])
       setConfigs(systemData || {})
       setKeywords(Array.isArray(keywordData) ? keywordData : [])
       setLlmConfigs(Array.isArray(llmData) ? llmData : [])
+      setKbConfigs(Array.isArray(kbData) ? kbData : [])
     } finally {
       setLoading(false)
     }
@@ -190,6 +194,8 @@ export default function Settings() {
     }
   }
 
+  const activeKbConfigs = kbConfigs.filter((item) => item?.is_active)
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -234,6 +240,11 @@ export default function Settings() {
             className="input-field w-56 rounded-lg px-3 py-2 text-sm"
           >
             <option value="" className="bg-slate-950">不使用知识库</option>
+            {activeKbConfigs.map((item) => (
+              <option key={item.id} value={String(item.id)} className="bg-slate-950">
+                {item.name}
+              </option>
+            ))}
           </select>
         </Row>
         <Row label="回复前缀" desc="给 AI 回复统一加一段文字。">

@@ -203,6 +203,58 @@ def is_selectable_friend_wxid(wxid: str) -> bool:
     }
 
 
+def guess_image_media_type(path: Path) -> str:
+    try:
+        header = path.read_bytes()[:16]
+    except Exception:
+        return "application/octet-stream"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+async def download_wechat_image(message: dict, flag: int) -> Optional[Path]:
+    """Ask pywxrobot to download a WeChat image and return its local file path."""
+    pywxrobot_url = get_pywxrobot_url()
+    msgid = str(message.get("msgid") or "")
+    candidates = [
+        message.get("sender"),
+        message.get("room_sender"),
+        message.get("recipient"),
+    ]
+    seen = set()
+    wxids = []
+    for wxid in candidates:
+        if wxid and wxid not in seen:
+            seen.add(wxid)
+            wxids.append(wxid)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for wxid in wxids:
+            try:
+                resp = await client.post(
+                    f"{pywxrobot_url}/cdn/image",
+                    json={"msgid": msgid, "wxid": wxid, "flag": flag, "wait": True},
+                )
+                if resp.status_code != 200:
+                    continue
+                payload = resp.json() if resp.text else {}
+                image_path = payload.get("path") if isinstance(payload, dict) else None
+                if image_path:
+                    path = Path(image_path)
+                    if path.is_file():
+                        return path
+            except Exception as e:
+                logger.debug(f"Failed to download image {msgid} with wxid {wxid}: {e}")
+    return None
+
+
 @app.post("/api/messages")
 async def receive_message(msg: MessagePush):
     """Endpoint for pywxrobot to push incoming WeChat messages.
@@ -239,6 +291,29 @@ async def get_messages(
 async def get_message_statistics():
     """Get message statistics for the dashboard."""
     return db.get_message_stats()
+
+
+@app.get("/api/messages/image/{msgid}")
+async def get_message_image(msgid: str, variant: str = Query(default="thumb", pattern="^(thumb|full)$")):
+    """Return a locally downloaded WeChat image thumbnail/full image."""
+    message = db.get_message(msgid)
+    if not message:
+        raise HTTPException(status_code=404, detail="message not found")
+    if int(message.get("msg_type") or 0) != 3:
+        raise HTTPException(status_code=400, detail="message is not an image")
+
+    flags = [1, 2] if variant == "thumb" else [2, 1]
+    for flag in flags:
+        path = await download_wechat_image(message, flag)
+        if path:
+            return FileResponse(
+                str(path),
+                media_type=guess_image_media_type(path),
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+
+    raise HTTPException(status_code=404, detail="image file not available")
+
 
 @app.delete("/api/messages")
 async def reset_all_messages():

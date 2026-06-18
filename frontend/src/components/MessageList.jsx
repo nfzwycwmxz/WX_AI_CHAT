@@ -96,18 +96,41 @@ function extractUrlFromText(text = '') {
   return match ? decodeEntity(match[0]) : ''
 }
 
+function buildMessageImageUrl(msgid, variant = 'thumb') {
+  if (!msgid) return ''
+  const search = new URLSearchParams({ variant })
+  return `/api/messages/image/${encodeURIComponent(msgid)}?${search.toString()}`
+}
+
+function getImageMessagePayload(message) {
+  const content = message?.content || ''
+  const attrs = readXmlTagAttrs(content, 'img')
+  const fallbackUrl = attrs.url || extractUrlFromText(content)
+  return {
+    thumbUrl: buildMessageImageUrl(message?.msgid, 'thumb') || fallbackUrl,
+    fullUrl: buildMessageImageUrl(message?.msgid, 'full') || fallbackUrl,
+    meta: [
+      attrs.cdnthumbwidth && attrs.cdnthumbheight ? `${attrs.cdnthumbwidth}x${attrs.cdnthumbheight}` : '',
+      attrs.length ? `${attrs.length} B` : '',
+      attrs.md5 ? `MD5 ${attrs.md5}` : '',
+    ].filter(Boolean).join(' · '),
+  }
+}
+
 function parseMessageContent(message) {
   const content = message.content || ''
   const type = Number(message.msg_type)
 
   if (type === 3) {
     const attrs = readXmlTagAttrs(content, 'img')
-    const url = attrs.cdnbigimgurl || attrs.cdnmidimgurl || attrs.cdnthumburl || attrs.url || extractUrlFromText(content)
+    const image = getImageMessagePayload(message)
     return {
       kind: 'image',
       label: '图片',
-      url,
-      meta: attrs.md5 ? `MD5 ${attrs.md5}` : '',
+      url: image.thumbUrl,
+      thumbUrl: image.thumbUrl,
+      fullUrl: image.fullUrl,
+      meta: image.meta,
       text: stripMessage(content),
     }
   }
@@ -205,21 +228,54 @@ function MediaShell({ icon: Icon, title, children, meta, fromSelf }) {
   )
 }
 
+function MessageImage({ parsed }) {
+  const primarySrc = parsed.thumbUrl || parsed.url || ''
+  const fallbackSrc = parsed.fullUrl || parsed.url || ''
+  const [src, setSrc] = useState(primarySrc)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    setSrc(primarySrc)
+    setFailed(false)
+  }, [primarySrc, fallbackSrc])
+
+  if (!primarySrc) {
+    return (
+      <div className="rounded-md border border-dashed border-current/20 px-3 py-6 text-center text-xs opacity-70">
+        鍥剧墖璧勬簮鏈笅杞芥垨闇€瑕侀€氳繃寰俊瀹㈡埛绔В瀵?
+      </div>
+    )
+  }
+
+  return failed ? (
+    <div className="rounded-md border border-dashed border-current/20 px-3 py-6 text-center text-xs opacity-70">
+      鍥剧墖鍔犺浇澶辫触锛屽彲灏濊瘯鍦ㄥ井淇″鎴风涓煡鐪嬪師鍥?
+    </div>
+  ) : (
+    <a href={fallbackSrc || primarySrc} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md border border-black/10 bg-black/20">
+      <img
+        src={src}
+        alt="寰俊鍥剧墖"
+        className="max-h-64 max-w-full object-contain"
+        loading="lazy"
+        onError={() => {
+          if (src !== fallbackSrc && fallbackSrc) {
+            setSrc(fallbackSrc)
+            return
+          }
+          setFailed(true)
+        }}
+      />
+    </a>
+  )
+}
+
 function MessageBody({ message, fromSelf }) {
   const parsed = parseMessageContent(message)
-
   if (parsed.kind === 'image') {
     return (
-      <MediaShell icon={Image} title="图片" meta={parsed.url ? '' : parsed.meta || '未解析到图片地址'} fromSelf={fromSelf}>
-        {parsed.url ? (
-          <a href={parsed.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-md border border-black/10 bg-black/20">
-            <img src={parsed.url} alt="微信图片" className="max-h-64 max-w-full object-contain" loading="lazy" />
-          </a>
-        ) : (
-          <div className="rounded-md border border-dashed border-current/20 px-3 py-6 text-center text-xs opacity-70">
-            图片资源未下载或需要通过微信客户端解密
-          </div>
-        )}
+      <MediaShell icon={Image} title="图片" meta={parsed.meta || ''} fromSelf={fromSelf}>
+        <MessageImage parsed={parsed} />
       </MediaShell>
     )
   }
